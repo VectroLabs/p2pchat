@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>P2P Chat</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    :root {
+      --background-color: #121212;
+      --surface-color: #1e1e1e;
+      --primary-text-color: #e0e0e0;
+      --secondary-text-color: #b0b0b0;
+      --accent-color: #03dac6;
+      --accent-color-dark: #018786;
+      --success-color: #4caf50;
+      --error-color: #cf6679;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background-color: var(--background-color);
+      color: var(--primary-text-color);
+      margin: 0;
+      padding: 20px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 700px;
+      display: flex;
+      flex-direction: column;
+      height: 95vh;
+      max-height: 800px;
+      background: var(--surface-color);
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.7);
+      overflow: hidden;
+    }
+
+    /* --- Connection Panel --- */
+    #connection-panel {
+      padding: 15px;
+      background: rgba(0,0,0,0.2);
+      border-bottom: 1px solid #333;
+    }
+    .id-section { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    #my-id { font-weight: bold; background: var(--background-color); padding: 5px 10px; border-radius: 4px; }
+    .connect-section { display: flex; gap: 10px; }
+    #connection-status { font-size: 0.9em; text-align: center; padding-top: 5px; }
+    .status-disconnected { color: var(--error-color); }
+    .status-connected { color: var(--success-color); }
+
+    /* --- Chat View --- */
+    #messages { 
+      flex-grow: 1; 
+      padding: 20px; 
+      overflow-y: auto; 
+      display: flex; 
+      flex-direction: column; 
+      gap: 12px; 
+    }
+    .message-bubble { 
+      max-width: 75%; 
+      padding: 10px 15px; 
+      border-radius: 18px; 
+      line-height: 1.4; 
+      word-wrap: break-word; 
+    }
+    .message-bubble.self { 
+      background: var(--accent-color-dark); 
+      align-self: flex-end; 
+      border-bottom-right-radius: 4px; 
+    }
+    .message-bubble.peer { 
+      background: #373737; 
+      align-self: flex-start; 
+      border-bottom-left-radius: 4px; 
+    }
+    .message-bubble .timestamp { 
+      display: block; 
+      font-size: 0.7em; 
+      color: var(--secondary-text-color); 
+      text-align: right; 
+      margin-top: 5px; 
+    }
+    .chat-input { 
+      display: flex; 
+      padding: 15px; 
+      gap: 10px; 
+      border-top: 1px solid #333; 
+    }
+    #message { 
+      flex-grow: 1; 
+      resize: none; 
+    }
+    
+    /* General Inputs & Buttons */
+    input, textarea, button { 
+      font-size: 16px; 
+      border-radius: 5px; 
+      border: 1px solid #444; 
+      background: #2a2a2a; 
+      color: var(--primary-text-color); 
+      padding: 10px; 
+      box-sizing: border-box; 
+    }
+    input:focus, textarea:focus { 
+      outline: none; 
+      border-color: var(--accent-color); 
+    }
+    button { 
+      cursor: pointer; 
+      border: none; 
+      transition: background-color 0.2s ease; 
+      background-color: var(--accent-color);
+      color: #000;
+    }
+    button:hover {
+      background-color: var(--accent-color-dark);
+      color: var(--primary-text-color);
+    }
+    button:disabled { 
+      background-color: #555; 
+      color: #888; 
+      cursor: not-allowed; 
+    }
+
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <div id="connection-panel">
+      <div class="id-section">
+          <strong>Your ID:</strong> <span id="my-id">Loading...</span>
+          <button id="copy-btn">Copy</button>
+      </div>
+      <div class="connect-section">
+          <input type="text" id="peer-id" placeholder="Enter peer ID">
+          <button id="connect-btn">Connect</button>
+      </div>
+      <div id="connection-status" class="status-disconnected">Disconnected</div>
+    </div>
+    
+    <div id="messages"></div>
+
+    <div class="chat-input">
+      <textarea id="message" placeholder="Type a message..." rows="1" disabled></textarea>
+      <button id="send-btn" disabled>Send</button>
+    </div>
+
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/peerjs@1.4.7/dist/peerjs.min.js"></script>
+  <script>
+    // --- DOM Elements ---
+    const myIdEl = document.getElementById('my-id');
+    const copyBtn = document.getElementById('copy-btn');
+    const peerIdInput = document.getElementById('peer-id');
+    const connectBtn = document.getElementById('connect-btn');
+    const connectionStatusEl = document.getElementById('connection-status');
+    const messagesEl = document.getElementById('messages');
+    const messageInput = document.getElementById('message');
+    const sendBtn = document.getElementById('send-btn');
+    
+    // --- State Variables ---
+    const peer = new Peer();
+    let dataConn = null;
+
+    // --- PeerJS Setup ---
+    peer.on('open', id => {
+      myIdEl.textContent = id;
+    });
+
+    peer.on('connection', newConnection => {
+        dataConn = newConnection;
+        setupDataConnection();
+    });
+
+    peer.on('error', err => {
+        console.error("PeerJS Error:", err);
+        alert(err.message); // Simple error feedback
+    });
+
+    // --- Connection Logic ---
+    connectBtn.onclick = () => {
+      const peerId = peerIdInput.value.trim();
+      if (!peerId) return;
+      dataConn = peer.connect(peerId);
+      dataConn.on('open', () => setupDataConnection());
+      dataConn.on('error', err => console.error("Connection Error:", err));
+    };
+
+    function setupDataConnection() {
+        updateConnectionStatus(true, dataConn.peer);
+        dataConn.on('data', data => addMessage("Peer", data));
+        dataConn.on('close', () => updateConnectionStatus(false));
+    }
+
+    function updateConnectionStatus(connected, peerId = '') {
+      if (connected) {
+        connectionStatusEl.textContent = `Connected to ${peerId}`;
+        connectionStatusEl.className = 'status-connected';
+        [connectBtn, peerIdInput].forEach(el => el.disabled = true);
+        [sendBtn, messageInput].forEach(el => el.disabled = false);
+        messageInput.focus();
+      } else {
+        connectionStatusEl.textContent = 'Disconnected';
+        connectionStatusEl.className = 'status-disconnected';
+        [connectBtn, peerIdInput].forEach(el => el.disabled = false);
+        [sendBtn, messageInput].forEach(el => el.disabled = true);
+        if (dataConn) dataConn.close();
+        dataConn = null;
+      }
+    }
+    
+    // --- Chat Logic ---
+    sendBtn.onclick = sendMessage;
+    messageInput.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !e.shiftKey) { 
+            e.preventDefault(); 
+            sendMessage(); 
+        }
+    });
+    
+    function sendMessage() {
+        const msg = messageInput.value.trim();
+        if (msg && dataConn) {
+            dataConn.send(msg);
+            addMessage("You", msg);
+            messageInput.value = "";
+        }
+    }
+
+    function addMessage(sender, msg) {
+        const bubble = document.createElement('div');
+        bubble.classList.add('message-bubble', sender === 'You' ? 'self' : 'peer');
+        
+        const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+        // Sanitize message to prevent HTML injection
+        const messageText = document.createElement('span');
+        messageText.textContent = msg;
+
+        bubble.appendChild(messageText);
+        bubble.insertAdjacentHTML('beforeend', `<span class="timestamp">${timestamp}</span>`);
+        
+        messagesEl.appendChild(bubble);
+        messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    // --- Utility ---
+    copyBtn.onclick = () => {
+        navigator.clipboard.writeText(myIdEl.textContent).then(() => {
+            copyBtn.textContent = 'Copied!';
+            setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+        });
+    };
+    
+  </script>
+</body>
+</html>
